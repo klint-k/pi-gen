@@ -1,4 +1,13 @@
-#!/bin/bash -e
+#!/bin/bash
+set -e
+set -o pipefail
+
+PI_GEN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+"$PI_GEN_DIR/tools/clean-work.sh"
+"$PI_GEN_DIR/tools/preflight.sh"
+
+cd "$PI_GEN_DIR"
 
 # shellcheck disable=SC2119
 run_sub_stage()
