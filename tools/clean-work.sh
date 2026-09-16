@@ -1,8 +1,9 @@
 #!/bin/bash
 
-WORK="$HOME/pi-gen/work"
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORK="$BASE_DIR/work"
 
-echo "Pi-gen work cleanup"
+echo "pi-gen work cleanup"
 echo "==================="
 
 if [ ! -d "$WORK" ]; then
@@ -22,13 +23,12 @@ do
 done
 
 echo
-echo "Removing old PiNode work directories..."
+echo "Removing old pi-gen work directories..."
 
 find "$WORK" \
     -maxdepth 1 \
     -mindepth 1 \
     -type d \
-    -name 'pinode-*' \
     -print \
     -exec sudo rm -rf {} \;
 
