@@ -1,60 +1,150 @@
 #!/bin/bash
 
-STAGE="$HOME/pinode-os/stage"
+set -u
+
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ERRORS=0
 
-echo "PiNode preflight"
-echo "==============="
+echo "pi-gen preflight"
+echo "================"
 
 echo
 echo "Checking shell scripts..."
+
 while IFS= read -r file
 do
     if ! bash -n "$file"; then
         echo "FAIL: $file"
         ERRORS=$((ERRORS + 1))
     fi
-done < <(find "$STAGE" -type f -name '*.sh')
+
+done < <(
+    find "$BASE_DIR" \
+        -path "$BASE_DIR/work" -prune -o \
+        -type f \
+        -name '*.py' \
+        -print
+)
+
 
 echo
 echo "Checking Python..."
+
 while IFS= read -r file
 do
-    if ! python3 -m py_compile "$file"; then
+    if ! python3 -c \
+        'import sys; compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")' \
+        "$file"
+    then
         echo "FAIL: $file"
         ERRORS=$((ERRORS + 1))
     fi
-done < <(find "$STAGE" -type f -name '*.py')
+
+done < <(
+    find "$BASE_DIR" \
+        -path "$BASE_DIR/work" -prune -o \
+        -type f \
+        -name '*.py' \
+        -print
+)
+
 
 echo
 echo "Checking JSON..."
+
 while IFS= read -r file
 do
-    if ! python3 -m json.tool "$file" >/dev/null; then
+    if ! python3 -m json.tool "$file" >/dev/null
+    then
         echo "FAIL: $file"
         ERRORS=$((ERRORS + 1))
     fi
-done < <(find "$STAGE" -type f -name '*.json')
+
+done < <(
+    find "$BASE_DIR" \
+        -path "$BASE_DIR/work" -prune -o \
+        -path "$BASE_DIR/export-noobs/00-release/files/partitions.json" -prune -o \
+        -type f \
+        -name '*.json' \
+        -print
+)
+
 
 echo
 echo "Checking executable run scripts..."
+
 while IFS= read -r file
 do
     if [ ! -x "$file" ]; then
         echo "FAIL: not executable: $file"
         ERRORS=$((ERRORS + 1))
     fi
-done < <(find "$STAGE" -type f \( -name '*run.sh' -o -name '*run-chroot.sh' \))
+
+done < <(
+    find "$BASE_DIR" \
+        -path "$BASE_DIR/work" -prune -o \
+        -type f \
+        \( \
+            -name '*run.sh' \
+            -o -name '*run-chroot.sh' \
+        \) \
+        -print
+)
 
 echo
-echo "Checking for __pycache__..."
-find "$STAGE" -type d -name '__pycache__' -print
+echo "Checking for first-user ownership from build host..."
+
+while IFS= read -r line
+do
+    echo "FAIL: possible build-host user/group reference:"
+    echo "      $line"
+    ERRORS=$((ERRORS + 1))
+
+done < <(
+    grep -R -n -E \
+        'install .*(-o pi|-g pi)|chown +pi:pi' \
+        "$BASE_DIR" \
+        --include='*.sh' \
+        --exclude='preflight.sh' \
+        --exclude-dir='work' \
+        2>/dev/null || true
+)
+
 
 echo
-echo "Checking old PiNode SSH path..."
-grep -R "/var/lib/pinode/ssh" "$STAGE" \
-    --exclude-dir="__pycache__" \
-    2>/dev/null
+echo "Checking configuration..."
+
+CONFIG_FILE=""
+
+if [ -n "${CONFIG_FILE:-}" ] && [ -f "$CONFIG_FILE" ]; then
+    :
+elif [ -n "${CONFIG:-}" ] && [ -f "$CONFIG" ]; then
+    CONFIG_FILE="$CONFIG"
+fi
+
+if [ -n "$CONFIG_FILE" ]; then
+
+    FIRST_USER_NAME=$(
+        awk -F= '
+            /^FIRST_USER_NAME=/ {
+                value=$2
+                gsub(/^'\''|'\''$/, "", value)
+                gsub(/^"|"$/, "", value)
+                print value
+            }
+        ' "$CONFIG_FILE"
+    )
+
+    if [ -n "$FIRST_USER_NAME" ]; then
+        echo "Configured first user: $FIRST_USER_NAME"
+    else
+        echo "WARNING: FIRST_USER_NAME not found in config"
+    fi
+
+else
+    echo "No config file supplied; skipping user consistency checks."
+fi
+
 
 echo
 if [ "$ERRORS" -eq 0 ]; then
@@ -64,45 +154,3 @@ fi
 
 echo "Preflight failed: $ERRORS error(s)."
 exit 1
-"""
-
-
-~/pi-gen/tools/clean-work.sh
-
-"""
-#!/bin/bash
-
-WORK="$HOME/pi-gen/work"
-
-echo "Pi-gen work cleanup"
-echo "==================="
-
-if [ ! -d "$WORK" ]; then
-    echo "No work directory."
-    exit 0
-fi
-
-echo
-echo "Unmounting stale pi-gen mounts..."
-
-mount | awk -v work="$WORK" '
-    index($3, work) == 1 { print $3 }
-' | sort -r | while read -r mountpoint
-do
-    echo "Unmounting: $mountpoint"
-    sudo umount "$mountpoint" 2>/dev/null || true
-done
-
-echo
-echo "Removing old PiNode work directories..."
-
-find "$WORK" \
-    -maxdepth 1 \
-    -mindepth 1 \
-    -type d \
-    -name 'pinode-*' \
-    -print \
-    -exec sudo rm -rf {} \;
-
-echo
-echo "Cleanup complete."
